@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <unistd.h>
 #include <errno.h>
 #include <linux/limits.h>
@@ -19,13 +20,14 @@
 // Change this path according to you system - ACPI is a mess and location of these files vary a lot
 #define AC_PATH "/sys/class/power_supply/AC0"
 // This is the file that stores the status of the AC, the "online" provives a 0 or a 1
-#define AC_STATUS_PATH "online"
+#define AC_STATUS_FILE "online"
 
 #define STATUS_PLUGGED   1
 #define STATUS_UNPLUGGED 0
 
 // ##### SOUNDS #####
-#define SHELL_PLAYER "pw-play" // Calling shell program saves me from a headache, change this if needed
+// Calling shell program saves me from a headache, change this if needed
+#define SHELL_PLAYER "pw-play" // or aplay, mpv, etc...
 #define SOUNDS_PATH "/usr/share/sounds/freedesktop/stereo"
 #define SOUND_PLUG "power-plug.oga"
 #define SOUND_UNPLUG "power-unplug.oga"
@@ -36,6 +38,9 @@
 // Change size according to your system, mine uses only a single digit number, so size 3 for the number itself, newline if present, and null terminator
 #define AC_STATUS_SIZE 3
 
+// ##### FLAGS #####
+int flags = 0;
+const int flag_verbose = (1>>0);
 
 // ##### HELPER FUNCTIONS #####
 // Opening and reading file
@@ -85,16 +90,60 @@ static inline int get_AC_status(char *path_to_AC_status, int *output){
 	return 0;
 }
 
+// Prints to stdout only if the verbose flag is set
+static inline int verbose_printf(const char *format, ...){
+	if(flags ^ flag_verbose)
+		return 0;
+	int len = 0;
+	va_list argv;
+	va_start(argv, format);
+	
+	// Loop through the string
+	for (int i = 0; format[i] != '\0'; i++)
+	{
+		if (format[i] != '%'){
+			putchar(format[i]);
+			len++;
+		} else {
+			i++;
+			switch (format[i]){
+				case 's':
+					// Get the elipsis arguments
+					char *str;
+					str = va_arg(argv, char *);
+					int j;
+					for (j = 0; str[j] != '\0'; j++){
+						putchar(str[j]);
+						len++;
+					}
+					break;
+				/*case 'd': // I don't really need this
+					char *str;
+					str = va_arg(argv, char *) + '0';
+					int j;
+					for (j = 0; str[j] != '\0'; j++){
+						putchar(str[j]);
+						len++;
+					}
+					break;
+					*/
+				default:
+					break;
+			}
+		}
+	}
+
+	va_end(argv);
+	return len;
+}
+
 // ##### MAIN #####
 int main(int argc, char **argv){
 	// ARGUMENTS
 	// Making this program compatible with arguments following GNU standard is a headache and too complex for a single source file, so only verbose flag should be available
-	int fFlags = 0;
-	const int fVerbose = (1>>0);
-
 	for (int i = 1; i < argc; i++){
 		if (argv[i][1] == 'v')
-			fFlags |= fVerbose;
+			flags |= flag_verbose;
 	}
 	
 	// PROGRAM
@@ -106,7 +155,7 @@ int main(int argc, char **argv){
 	// CONVERSIONS
 	// Convert the AC define paths into a single string
 	char AC_file[PATH_MAX];
-	snprintf(AC_file, PATH_MAX, "%s/%s", AC_PATH, AC_STATUS_PATH);
+	snprintf(AC_file, PATH_MAX, "%s/%s", AC_PATH, AC_STATUS_FILE);
 
 	// Convert the sounds define into a single string
 	char sound_plug[sizeof(SOUNDS_PATH) + sizeof(SOUND_PLUG) + 2];
@@ -114,20 +163,19 @@ int main(int argc, char **argv){
 	snprintf(sound_plug, sizeof(sound_plug), "%s/%s", SOUNDS_PATH, SOUND_PLUG);
 	snprintf(sound_unplug, sizeof(sound_unplug), "%s/%s", SOUNDS_PATH, SOUND_UNPLUG);
 	
+	int err; // For getting error codes
 	// Get current AC status before starting loop
-	int err;
 	err = get_AC_status(AC_file, &b_ACStatus);
 	if (err != 0) return err;
 
 	// If verbose; print info, otherwise get to looping
-	if (fFlags & fVerbose){
-		printf("PROGRAM STARTING WITH VERBOSE FLAG SET\n");
-		printf("AC_file:\t%s\n", AC_file);
-		printf("sound_plug:\t%s\n", sound_plug);
-		printf("sound_unplug:\t%s\n", sound_unplug);
-		printf("\nLOG START:\n");
-	}
-
+	verbose_printf("PROGRAM STARTING WITH VERBOSE FLAG SET\n");
+	verbose_printf("AC_file:\t%s\n", AC_file);
+	verbose_printf("sound_plug:\t%s\n", sound_plug);
+	verbose_printf("sound_unplug:\t%s\n", sound_unplug);
+	verbose_printf("\nLOG START:\n");
+	
+	// MAIN LOOP
 	while(1){
 		// Get current status
 		err = get_AC_status(AC_file, &b_ACStatus_real);
@@ -135,8 +183,7 @@ int main(int argc, char **argv){
 
 		// If no change happened, wait and go to next loop iteration 
 		if (b_ACStatus == b_ACStatus_real){
-			if(fFlags & fVerbose)
-				printf("[LOG] %s: No state change detected\n", argv[0]);
+			verbose_printf("[LOG] %s: No state change detected\n", argv[0]);
 			sleep(SLEEP_TIME);
 			continue;
 		}
@@ -145,8 +192,7 @@ int main(int argc, char **argv){
 		b_ACStatus = b_ACStatus_real;
 		// If state changed to plugged
 		if(b_ACStatus_real == STATUS_PLUGGED){
-			if(fFlags & fVerbose)
-				printf("[LOG] %s: AC was plugged\n", argv[0]);
+			verbose_printf("[LOG] %s: AC was plugged\n", argv[0]);
 			char shell_command[sizeof(SHELL_PLAYER) + sizeof(sound_plug) + 2];
 			snprintf(shell_command, sizeof(shell_command),"%s %s", SHELL_PLAYER, sound_plug);
 			system(shell_command);
@@ -154,8 +200,7 @@ int main(int argc, char **argv){
 			continue;
 		}
 		// If state changed to unplugged - no if needed
-		if(fFlags & fVerbose)
-			printf("[LOG] %s: AC was unplugged\n", argv[0]);
+		verbose_printf("[LOG] %s: AC was unplugged\n", argv[0]);
 		char shell_command[sizeof(SHELL_PLAYER) + sizeof(sound_unplug) + 2];
 		snprintf(shell_command, sizeof(shell_command),"%s %s", SHELL_PLAYER, sound_unplug);
 		system(shell_command);
