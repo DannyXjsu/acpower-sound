@@ -18,8 +18,6 @@
 // ##### PROGRAM DEFINES #####
 // Main program runs in a while loop, it's highly inefficient to keep reading a file that barely ever changes, save some CPU usage by waiting a little between each loop
 #define SLEEP_TIME 1
-// Change size according to your system, mine uses only a single digit number, so size 3 for the number itself, newline if present, and null terminator
-#define AC_STATUS_SIZE 2
 
 // ##### ACPI STUFF #####
 // Change this path according to you system - ACPI is a mess and location of these files vary a lot
@@ -41,52 +39,22 @@
 unsigned int flags = 0;
 const unsigned int flag_verbose = (1<<0);
 const unsigned int flag_litemode = (1<<1);
+const unsigned int flag_mute = (1<<2);
 
 // ##### HELPER FUNCTIONS #####
-// Opening and reading file
-static inline int read_status_file(char *status_file, char out[AC_STATUS_SIZE]){
-	FILE *file;
-	char *line = NULL;
-	size_t len = 0;
-	ssize_t read = 0;
-
-	file = fopen(status_file, "r");
+// Opening file and only reading the first character (which is the only one relevant, and present)
+static inline int read_status_file(char *status_file, unsigned int *out){
+	FILE *file = fopen(status_file, "r");
 	if (file == NULL) {
 		perror("Error opening file, please change the source code in case system uses a different path for AC power supply status");
 		return errno;
 	}
 
-	// Only a single line needed
-	if ((read = getline(&line, &len, file)) != -1){
-		snprintf(out, AC_STATUS_SIZE, "%s", line);
-	} else {
-		perror("Unable to read line");
-	}
+	int char_ = fgetc(file);
+	if (char_ == EOF) perror("Missing status!");
+	else *out = char_ - '0'; // Convert char to int by subtracting ascii value of 0
 
-	free(line);
 	fclose(file);
-	return 0;
-}
-
-// Convert string to integer - return value is reserved for errors
-static inline int str2int(char *string, int *output){
-	int err = sscanf(string, "%d", output);
-	if (err <= 0)
-		return err;
-
-	return 0;
-}
-
-// Uses the 2 above functions to get the integer value of the AC status - returns are for errors
-static inline int get_AC_status(char *path_to_AC_status, int *output){
-	// Buffer for reading the status from file
-	char s_ACStatus[AC_STATUS_SIZE];
-	if (read_status_file(path_to_AC_status, s_ACStatus) != 0)
-		return errno;
-
-	// Conversion
-	errno = str2int(s_ACStatus, output);
-	if (errno != 0) return errno;
 	return 0;
 }
 
@@ -139,7 +107,7 @@ static inline int verbose_printf(const char *format, ...){
 
 static inline void print_help(bool unknown, char *arg)
 {
-	printf("usage: acpower-sound [-h] [-l] [-v]\n\n");
+	printf("usage: acpower-sound [-h] [-l] [-v] [-m]\n\n");
 	if (unknown){
 		printf("acpower-sound: error: Unknown arguments: %s\n", arg);
 	} else {
@@ -147,7 +115,8 @@ static inline void print_help(bool unknown, char *arg)
 		printf("option:\n");
 		printf("\t-h\tShow this help message and exit.\n");
 		printf("\t-l\tEnables lite mode - run once and play sound depending of current AC state.\n");
-		printf("\t-v\tEnable verbose output - prints current state every loop,\n");
+		printf("\t-m\tMute - skip playing audio when the state changes.\n");
+		printf("\t-v\tEnable verbose output - prints current state every loop.\n");
 	}
 }
 
@@ -164,6 +133,9 @@ int main(int argc, char **argv){
 				case 'l':
 					flags |= flag_litemode;
 					break;
+				case 'm':
+					flags |= flag_mute;
+					break;
 				case 'h':
 					print_help(0, NULL);
 					return 0;
@@ -177,9 +149,9 @@ int main(int argc, char **argv){
 	
 	// PROGRAM
 	// This holds the status number in integer, gets updated only when there's a change in status
-	int b_ACStatus = STATUS_UNPLUGGED;
+	int AC_status = STATUS_UNPLUGGED;
 	// Same as above, but this is updated every loop
-	int b_ACStatus_real = STATUS_UNPLUGGED;
+	int AC_status_real = STATUS_UNPLUGGED;
 	
 	// CONVERSIONS
 	// Convert the AC define paths into a single string
@@ -192,42 +164,44 @@ int main(int argc, char **argv){
 	snprintf(sound_plug, sizeof(sound_plug), "%s/%s", SOUNDS_PATH, SOUND_PLUG);
 	snprintf(sound_unplug, sizeof(sound_unplug), "%s/%s", SOUNDS_PATH, SOUND_UNPLUG);
 	
-	int err; // For getting error codes
 	// Get current AC status before starting loop
-	err = get_AC_status(AC_file, &b_ACStatus);
-	if (err != 0) return err;
+	errno = read_status_file(AC_file, &AC_status);
+	if (errno != 0) return errno;
 
 	// If verbose; print info, otherwise get to looping
 	verbose_printf("PROGRAM STARTING WITH VERBOSE FLAG SET\n");
 	verbose_printf("AC_file:\t%s\n", AC_file);
 	verbose_printf("sound_plug:\t%s\n", sound_plug);
 	verbose_printf("sound_unplug:\t%s\n", sound_unplug);
+	// Verbosing flags
 	if (flags & flag_litemode)
 		verbose_printf("Lite mode is enabled\n");
+	if (flags & flag_mute)
+		verbose_printf("Mute flag set, playing audio will be skipped\n");
 	verbose_printf("\nLOG START:\n");
 	
 	// MAIN LOOP
 	// While NOT in lite mode do:
 	do {
 		// Get current status
-		err = get_AC_status(AC_file, &b_ACStatus_real);
-		if (err != 0) return err;
+		errno = read_status_file(AC_file, &AC_status_real);
+		if (errno != 0) return errno;
 
 		// If no change happened, wait and go to next loop iteration
-		if (!(flags & flag_litemode) && b_ACStatus == b_ACStatus_real){
+		if (!(flags & flag_litemode) && AC_status == AC_status_real){
 			verbose_printf("[LOG] %s: No state change detected\n", argv[0]);
 			sleep(SLEEP_TIME);
 			continue;
 		}
 
 		// If change happened then
-		b_ACStatus = b_ACStatus_real;
+		AC_status = AC_status_real;
 		// If state changed to plugged
-		if(b_ACStatus_real == STATUS_PLUGGED){
+		if(AC_status_real == STATUS_PLUGGED){
 			verbose_printf("[LOG] %s: AC was plugged\n", argv[0]);
 			char shell_command[sizeof(SHELL_PLAYER) + sizeof(sound_plug) + 2];
 			snprintf(shell_command, sizeof(shell_command),"%s %s", SHELL_PLAYER, sound_plug);
-			system(shell_command);
+			if(!(flags & flag_mute)) system(shell_command);
 
 			continue;
 		}
@@ -235,8 +209,7 @@ int main(int argc, char **argv){
 		verbose_printf("[LOG] %s: AC was unplugged\n", argv[0]);
 		char shell_command[sizeof(SHELL_PLAYER) + sizeof(sound_unplug) + 2];
 		snprintf(shell_command, sizeof(shell_command),"%s %s", SHELL_PLAYER, sound_unplug);
-		system(shell_command);
-		//continue;
+		if(!(flags & flag_mute)) system(shell_command);
 	} while (!(flags & flag_litemode));
 
 	return 0;
