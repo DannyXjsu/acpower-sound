@@ -23,10 +23,5 @@ option:
 Change the necessary defines in the source file.
 
 ## Performance
-The performance is okay, I first made a shell script doing the exact same thing this program does, since this is for a laptop, it has to be as
-efficient as possible, and I know a bash script is not that performant, so I wrote this program, pretty much a direct translation ignoring the
-helper functions and similar.
-
-I've used 'time' to compare more or less how long it takes to run the lite version of this program and the lite
-version of the script, they have pretty much the same time, so either this means this program is terribly optimized (which is very likely) or
-the bottleneck really is the I/O.
+You can use the lite mode to measure the time it takes the program to run, I recommend commenting out the system() function that
+calls the shell player so you get more accurate times, I think it's about as fast, and as light on resources as I can make.
