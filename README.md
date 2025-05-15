@@ -1,8 +1,6 @@
 # ACPower Sound
-Plays a sound whenever the AC state changes, when you plug or unplug your laptop, all in a single source file.
-
 This program will read ACPI status file of AC power supply to see if a change in 
-state (whether the AC was plugged or unplugged) happened and play a sound accordingly
+state (whether the AC was plugged or unplugged) happened and play a sound accordingly, all in a single source file.
 
 This solution uses an infinite loop to read a file every second (or another custom set delay time)
 to detect state changes and play a set sound, the 'sleep' function is used carefully since it's not
