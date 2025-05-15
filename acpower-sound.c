@@ -6,7 +6,7 @@
 #include <linux/limits.h>
 
 // ##### EXPLANATION #####
-// This program will read ACPI status file of AC power supply to see if a change in 
+// This program will read ACPI status file of AC power supply to see if a change in
 // state (whether the AC was plugged or unplugged) happened and play a sound accordingly
 //
 // This solution uses an infinite loop to read a file every second (or another custom set delay time)
@@ -15,6 +15,11 @@
 //
 // Customize the defines to your needs
 
+// ##### PROGRAM DEFINES #####
+// Main program runs in a while loop, it's highly inefficient to keep reading a file that barely ever changes, save some CPU usage by waiting a little between each loop
+#define SLEEP_TIME 1
+// Change size according to your system, mine uses only a single digit number, so size 3 for the number itself, newline if present, and null terminator
+#define AC_STATUS_SIZE 2
 
 // ##### ACPI STUFF #####
 // Change this path according to you system - ACPI is a mess and location of these files vary a lot
@@ -32,15 +37,10 @@
 #define SOUND_PLUG "power-plug.oga"
 #define SOUND_UNPLUG "power-unplug.oga"
 
-// ##### PROGRAM DEFINES #####
-// Main program runs in a while loop, it's highly inefficient to keep reading a file that barely ever changes, save some CPU usage by waiting a little between each loop
-#define SLEEP_TIME 1
-// Change size according to your system, mine uses only a single digit number, so size 3 for the number itself, newline if present, and null terminator
-#define AC_STATUS_SIZE 3
-
 // ##### FLAGS #####
-int flags = 0;
-const int flag_verbose = (1>>0);
+unsigned int flags = 0;
+const unsigned int flag_verbose = (1<<0);
+const unsigned int flag_litemode = (1<<1);
 
 // ##### HELPER FUNCTIONS #####
 // Opening and reading file
@@ -49,13 +49,13 @@ static inline int read_status_file(char *status_file, char out[AC_STATUS_SIZE]){
 	char *line = NULL;
 	size_t len = 0;
 	ssize_t read = 0;
-	
+
 	file = fopen(status_file, "r");
 	if (file == NULL) {
 		perror("Error opening file, please change the source code in case system uses a different path for AC power supply status");
 		return errno;
 	}
-	
+
 	// Only a single line needed
 	if ((read = getline(&line, &len, file)) != -1){
 		snprintf(out, AC_STATUS_SIZE, "%s", line);
@@ -92,14 +92,14 @@ static inline int get_AC_status(char *path_to_AC_status, int *output){
 
 // Prints to stdout only if the verbose flag is set
 static inline int verbose_printf(const char *format, ...){
-	if(flags ^ flag_verbose)
+	if(!(flags & flag_verbose))
 		return 0;
-	int len = 0;
+	size_t len = 0;
 	va_list argv;
 	va_start(argv, format);
-	
+
 	// Loop through the string
-	for (int i = 0; format[i] != '\0'; i++)
+	for (size_t i = 0; format[i] != '\0'; i++)
 	{
 		if (format[i] != '%'){
 			putchar(format[i]);
@@ -137,13 +137,42 @@ static inline int verbose_printf(const char *format, ...){
 	return len;
 }
 
+static inline void print_help(bool unknown, char *arg)
+{
+	printf("usage: acpower-sound [-h] [-l] [-v]\n\n");
+	if (unknown){
+		printf("acpower-sound: error: Unknown arguments: %s\n", arg);
+	} else {
+		printf("Reads AC status and plays sound depending of state changes.\n\n");
+		printf("option:\n");
+		printf("\t-h\tShow this help message and exit.\n");
+		printf("\t-l\tEnables lite mode - run once and play sound depending of current AC state.\n");
+		printf("\t-v\tEnable verbose output - prints current state every loop,\n");
+	}
+}
+
 // ##### MAIN #####
 int main(int argc, char **argv){
 	// ARGUMENTS
-	// Making this program compatible with arguments following GNU standard is a headache and too complex for a single source file, so only verbose flag should be available
-	for (int i = 1; i < argc; i++){
-		if (argv[i][1] == 'v')
-			flags |= flag_verbose;
+	for (size_t i = 1; i < argc; i++){
+		// If argument found
+		if (argv[i][0] == '-')
+			switch(argv[i][1]){
+				case 'v':
+					flags |= flag_verbose;
+					break;
+				case 'l':
+					flags |= flag_litemode;
+					break;
+				case 'h':
+					print_help(0, NULL);
+					return 0;
+					break;
+				default:
+					print_help(1, argv[i]);
+					return 0;
+					break;
+			}
 	}
 	
 	// PROGRAM
@@ -173,16 +202,19 @@ int main(int argc, char **argv){
 	verbose_printf("AC_file:\t%s\n", AC_file);
 	verbose_printf("sound_plug:\t%s\n", sound_plug);
 	verbose_printf("sound_unplug:\t%s\n", sound_unplug);
+	if (flags & flag_litemode)
+		verbose_printf("Lite mode is enabled\n");
 	verbose_printf("\nLOG START:\n");
 	
 	// MAIN LOOP
-	while(1){
+	// While NOT in lite mode do:
+	do {
 		// Get current status
 		err = get_AC_status(AC_file, &b_ACStatus_real);
 		if (err != 0) return err;
 
-		// If no change happened, wait and go to next loop iteration 
-		if (b_ACStatus == b_ACStatus_real){
+		// If no change happened, wait and go to next loop iteration
+		if (!(flags & flag_litemode) && b_ACStatus == b_ACStatus_real){
 			verbose_printf("[LOG] %s: No state change detected\n", argv[0]);
 			sleep(SLEEP_TIME);
 			continue;
@@ -204,8 +236,8 @@ int main(int argc, char **argv){
 		char shell_command[sizeof(SHELL_PLAYER) + sizeof(sound_unplug) + 2];
 		snprintf(shell_command, sizeof(shell_command),"%s %s", SHELL_PLAYER, sound_unplug);
 		system(shell_command);
-		//continue;	
-	}
+		//continue;
+	} while (!(flags & flag_litemode));
 
 	return 0;
 }
