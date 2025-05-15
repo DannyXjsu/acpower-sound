@@ -8,11 +8,21 @@ This solution uses an infinite loop to read a file every second (or another cust
 to detect state changes and play a set sound, the 'sleep' function is used carefully since it's not
 resource free, and to keep things simple, a shell program is used for playing sound
 
+## Usage
+Check the help message by using parameter '-h'
+```
+usage: acpower-sound [-h] [-l] [-v]
+
+Reads AC status and play sound depending of state changes.
+
+option:
+	-h	Show this help message and exit.
+	-l	Enables lite mode - run once and play sound depending of current AC state.
+	-v	Enable verbose output - prints current state every loop.
+```
+
 ## Configuration
 Change the necessary defines in the source file.
-
-## Lite
-The \*-lite source file is for testing, it runs once and plays a sound depending of your current AC state instead of watching for state changes.
 
 ## Performance
 The performance is okay, I first made a shell script doing the exact same thing this program does, since this is for a laptop, it has to be as
