@@ -30,23 +30,26 @@
 
 // ##### SOUNDS #####
 // Calling shell program saves me from a headache, change this if needed
-#define SHELL_PLAYER "pw-play" // or aplay, mpv, etc...
+// NOTE: Any output to stdout from the player will be supressed
+#define SHELL_PLAYER "ffplay" // or aplay, mpv, ffplay, etc...
+// Additional arguments for the player
+#define PLAYER_ARGS "-v 0 -nodisp -autoexit"
 #define SOUNDS_PATH "/usr/share/sounds/freedesktop/stereo"
 #define SOUND_PLUG "power-plug.oga"
 #define SOUND_UNPLUG "power-unplug.oga"
 
 // ##### FLAGS #####
 unsigned int flags = 0;
-const unsigned int flag_verbose = (1<<0);
-const unsigned int flag_litemode = (1<<1);
-const unsigned int flag_mute = (1<<2);
+const unsigned int flag_verbose	= 	(1<<0);	// 1
+const unsigned int flag_litemode=	(1<<1);	// 2
+const unsigned int flag_mute	=	(1<<2);	// 4
 
 // ##### HELPER FUNCTIONS #####
 // Opening file and only reading the first character (which is the only one relevant, and present)
 static inline int read_status_file(char *status_file, unsigned int *out){
 	FILE *file = fopen(status_file, "r");
 	if (file == NULL) {
-		perror("Error opening file, please change the source code in case system uses a different path for AC power supply status");
+		perror("Error opening AC status file");
 		return errno;
 	}
 
@@ -146,13 +149,13 @@ int main(int argc, char **argv){
 					break;
 			}
 	}
-	
+
 	// PROGRAM
 	// This holds the status number in integer, gets updated only when there's a change in status
-	int AC_status = STATUS_UNPLUGGED;
+	unsigned int AC_status = STATUS_UNPLUGGED;
 	// Same as above, but this is updated every loop
-	int AC_status_real = STATUS_UNPLUGGED;
-	
+	unsigned int AC_status_real = STATUS_UNPLUGGED;
+
 	// CONVERSIONS
 	// Convert the AC define paths into a single string
 	char AC_file[PATH_MAX];
@@ -163,7 +166,7 @@ int main(int argc, char **argv){
 	char sound_unplug[sizeof(SOUNDS_PATH) + sizeof(SOUND_UNPLUG) + 2];
 	snprintf(sound_plug, sizeof(sound_plug), "%s/%s", SOUNDS_PATH, SOUND_PLUG);
 	snprintf(sound_unplug, sizeof(sound_unplug), "%s/%s", SOUNDS_PATH, SOUND_UNPLUG);
-	
+
 	// Get current AC status before starting loop
 	errno = read_status_file(AC_file, &AC_status);
 	if (errno != 0) return errno;
@@ -179,7 +182,7 @@ int main(int argc, char **argv){
 	if (flags & flag_mute)
 		verbose_printf("Mute flag set, playing audio will be skipped\n");
 	verbose_printf("\nLOG START:\n");
-	
+
 	// MAIN LOOP
 	// While NOT in lite mode do:
 	do {
@@ -199,16 +202,16 @@ int main(int argc, char **argv){
 		// If state changed to plugged
 		if(AC_status_real == STATUS_PLUGGED){
 			verbose_printf("[LOG] %s: AC was plugged\n", argv[0]);
-			char shell_command[sizeof(SHELL_PLAYER) + sizeof(sound_plug) + 2];
-			snprintf(shell_command, sizeof(shell_command),"%s %s", SHELL_PLAYER, sound_plug);
+			char shell_command[16 + sizeof(SHELL_PLAYER) + sizeof(PLAYER_ARGS) + sizeof(sound_plug)];
+			snprintf(shell_command, sizeof(shell_command),"%s %s %s > /dev/null 2>&1", SHELL_PLAYER, PLAYER_ARGS, sound_plug);
 			if(!(flags & flag_mute)) system(shell_command);
 
 			continue;
 		}
 		// If state changed to unplugged - no if needed
 		verbose_printf("[LOG] %s: AC was unplugged\n", argv[0]);
-		char shell_command[sizeof(SHELL_PLAYER) + sizeof(sound_unplug) + 2];
-		snprintf(shell_command, sizeof(shell_command),"%s %s", SHELL_PLAYER, sound_unplug);
+		char shell_command[16 + sizeof(SHELL_PLAYER) + sizeof(PLAYER_ARGS) + sizeof(sound_unplug)];
+		snprintf(shell_command, sizeof(shell_command),"%s %s %s > /dev/null 2>&1", SHELL_PLAYER, PLAYER_ARGS, sound_unplug);
 		if(!(flags & flag_mute)) system(shell_command);
 	} while (!(flags & flag_litemode));
 
