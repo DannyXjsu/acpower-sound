@@ -28,7 +28,7 @@ I recommend creating a systemd user service so it starts everytime you login, th
 
 ```bash
 # Copy/move this file to user data folder
-$ cp acpi-power.service $XDG_DATA_HOME/systemd/user/
+$ cp acpi-sound.service $XDG_CONFIG_HOME/systemd/user/
 
 # Reload daemon (updates systemd stuff)
 $ systemctl --user daemon-reload
@@ -43,4 +43,4 @@ Change the necessary defines in the source file.
 
 
 ## Performance
-You can use the lite mode with the mute option to measure the time it takes the program to run, I think it's about as fast, and as light on resources as I can make.
+You can use the lite mode with the mute option to measure the time it takes the program to run, I think it's about as fast and as light on resources as I can make.
