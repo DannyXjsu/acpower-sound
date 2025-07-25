@@ -1,0 +1,8 @@
+[Unit]
+Description=Play sounds depending on the changes in ACPI power status.
+
+[Service]
+ExecStart=/opt/acpower-sound/acpower-sound
+
+[Install]
+WantedBy=default.target

@@ -9,7 +9,15 @@ default:
 	cd $(BUILD_DIR)
 	$(CC) $(CFLAGS) $(NAME).c -o $(BUILD_DIR)/$(NAME)
 
-.PHONY: clean
+.PHONY: install
+install:
+	@mkdir -p /opt/$(NAME)/$(NAME)
+	install -m 755 $(BUILD_DIR)/$(NAME) /opt/$(NAME)/$(NAME)
 
+.PHONY: uninstall
+uninstall:
+	rm $(HOME)/.local/bin/$(NAME)
+
+.PHONY: clean
 clean:
 	cd $(BUILD_DIR) && rm $(NAME)

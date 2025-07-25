@@ -3,6 +3,7 @@
 #include <stdarg.h>
 #include <unistd.h>
 #include <errno.h>
+#include <stdbool.h>
 #include <linux/limits.h>
 
 // ##### EXPLANATION #####
@@ -16,19 +17,19 @@
 // Customize the defines to your needs
 
 // ##### PROGRAM DEFINES #####
+
 // Main program runs in a while loop, it's highly inefficient to keep reading a file that barely ever changes, save some CPU usage by waiting a little between each loop
 #define SLEEP_TIME 1
 
 // ##### ACPI STUFF #####
+
 // Change this path according to you system - ACPI is a mess and location of these files vary a lot
 #define AC_PATH "/sys/class/power_supply/AC0"
 // This is the file that stores the status of the AC, the "online" provives a 0 or a 1
 #define AC_STATUS_FILE "online"
 
-#define STATUS_PLUGGED   1
-#define STATUS_UNPLUGGED 0
-
 // ##### SOUNDS #####
+
 // Calling shell program saves me from a headache, change this if needed
 // NOTE: Any output to stdout from the player will be supressed
 #define SHELL_PLAYER "ffplay" // or aplay, mpv, ffplay, etc...
@@ -39,13 +40,29 @@
 #define SOUND_UNPLUG "power-unplug.oga"
 
 // ##### FLAGS #####
+
 unsigned int flags = 0;
 const unsigned int flag_verbose	= 	(1<<0);	// 1
-const unsigned int flag_litemode=	(1<<1);	// 2
+const unsigned int flag_lite	=	(1<<1);	// 2
 const unsigned int flag_mute	=	(1<<2);	// 4
 
+// ##### ENUM #####
+
+typedef enum Status{
+    UNPLUGGED,
+    PLUGGED,
+}ACStatus;
+
+typedef struct{
+    // Location to where the AC power supply status file is located at
+    char status_file[PATH_MAX];
+    // Holds the current status of the AC power supply status
+    ACStatus status;
+}ACPI;
+
 // ##### HELPER FUNCTIONS #####
-// Opening file and only reading the first character (which is the only one relevant, and present)
+
+// Open file and only read the first character (which is the only one relevant, and present)
 static inline int read_status_file(char *status_file, unsigned int *out){
 	FILE *file = fopen(status_file, "r");
 	if (file == NULL) {
@@ -54,10 +71,10 @@ static inline int read_status_file(char *status_file, unsigned int *out){
 	}
 
 	int char_ = fgetc(file);
+	fclose(file);
 	if (char_ == EOF) perror("Missing status!");
 	else *out = char_ - '0'; // Convert char to int by subtracting ascii value of 0
 
-	fclose(file);
 	return 0;
 }
 
@@ -79,15 +96,16 @@ static inline int verbose_printf(const char *format, ...){
 			i++;
 			switch (format[i]){
 				case 's':
+				{
 					// Get the elipsis arguments
-					char *str;
-					str = va_arg(argv, char *);
+					char *str = va_arg(argv, typeof(str));
 					int j;
 					for (j = 0; str[j] != '\0'; j++){
 						putchar(str[j]);
 						len++;
 					}
 					break;
+				}
 				/*case 'd': // I don't really need this
 					char *str;
 					str = va_arg(argv, char *) + '0';
@@ -103,7 +121,6 @@ static inline int verbose_printf(const char *format, ...){
 			}
 		}
 	}
-
 	va_end(argv);
 	return len;
 }
@@ -123,10 +140,9 @@ static inline void print_help(bool unknown, char *arg)
 	}
 }
 
-// ##### MAIN #####
-int main(int argc, char **argv){
-	// ARGUMENTS
-	for (size_t i = 1; i < argc; i++){
+// Returns false if program should exit, true if should continue to main loop
+static inline bool set_flags(int argc, char **argv){
+    for (size_t i = 1; i < argc; i++){
 		// If argument found
 		if (argv[i][0] == '-')
 			switch(argv[i][1]){
@@ -134,32 +150,43 @@ int main(int argc, char **argv){
 					flags |= flag_verbose;
 					break;
 				case 'l':
-					flags |= flag_litemode;
+					flags |= flag_lite;
 					break;
 				case 'm':
 					flags |= flag_mute;
 					break;
 				case 'h':
 					print_help(0, NULL);
-					return 0;
+					return false;
 					break;
 				default:
 					print_help(1, argv[i]);
-					return 0;
+					return false;
 					break;
 			}
 	}
+    return true;
+}
+
+static inline bool is_flag_set(unsigned int flag){
+   return (flags & flag);
+}
+
+// ##### MAIN #####
+int main(int argc, char **argv){
+	// ARGUMENTS
+	if(!set_flags(argc, argv))
+	    return 0;
 
 	// PROGRAM
+	ACPI acpi;
+	acpi.status = UNPLUGGED;
 	// This holds the status number in integer, gets updated only when there's a change in status
-	unsigned int AC_status = STATUS_UNPLUGGED;
-	// Same as above, but this is updated every loop
-	unsigned int AC_status_real = STATUS_UNPLUGGED;
+	ACStatus acpi_status_previous = PLUGGED;
 
 	// CONVERSIONS
 	// Convert the AC define paths into a single string
-	char AC_file[PATH_MAX];
-	snprintf(AC_file, PATH_MAX, "%s/%s", AC_PATH, AC_STATUS_FILE);
+	snprintf(acpi.status_file, sizeof(acpi.status_file), "%s/%s", AC_PATH, AC_STATUS_FILE);
 
 	// Convert the sounds define into a single string
 	char sound_plug[sizeof(SOUNDS_PATH) + sizeof(SOUND_PLUG) + 2];
@@ -168,52 +195,54 @@ int main(int argc, char **argv){
 	snprintf(sound_unplug, sizeof(sound_unplug), "%s/%s", SOUNDS_PATH, SOUND_UNPLUG);
 
 	// Get current AC status before starting loop
-	errno = read_status_file(AC_file, &AC_status);
+	errno = read_status_file(acpi.status_file, &acpi_status_previous);
 	if (errno != 0) return errno;
 
 	// If verbose; print info, otherwise get to looping
 	verbose_printf("PROGRAM STARTING WITH VERBOSE FLAG SET\n");
-	verbose_printf("AC_file:\t%s\n", AC_file);
+	verbose_printf("acpi.status_file:\t%s\n", acpi.status_file);
 	verbose_printf("sound_plug:\t%s\n", sound_plug);
 	verbose_printf("sound_unplug:\t%s\n", sound_unplug);
 	// Verbosing flags
-	if (flags & flag_litemode)
+	if (flags & flag_lite)
 		verbose_printf("Lite mode is enabled\n");
 	if (flags & flag_mute)
 		verbose_printf("Mute flag set, playing audio will be skipped\n");
 	verbose_printf("\nLOG START:\n");
 
 	// MAIN LOOP
-	// While NOT in lite mode do:
 	do {
 		// Get current status
-		errno = read_status_file(AC_file, &AC_status_real);
+		errno = read_status_file(acpi.status_file, &acpi.status);
 		if (errno != 0) return errno;
 
 		// If no change happened, wait and go to next loop iteration
-		if (!(flags & flag_litemode) && AC_status == AC_status_real){
-			verbose_printf("[LOG] %s: No state change detected\n", argv[0]);
+		if (!is_flag_set(flag_lite) && acpi_status_previous == acpi.status){
+			//verbose_printf("No state change detected\n", argv[0]); // This bombs log files lol
 			sleep(SLEEP_TIME);
 			continue;
 		}
 
 		// If change happened then
-		AC_status = AC_status_real;
+		acpi_status_previous = acpi.status;
 		// If state changed to plugged
-		if(AC_status_real == STATUS_PLUGGED){
-			verbose_printf("[LOG] %s: AC was plugged\n", argv[0]);
-			char shell_command[16 + sizeof(SHELL_PLAYER) + sizeof(PLAYER_ARGS) + sizeof(sound_plug)];
-			snprintf(shell_command, sizeof(shell_command),"%s %s %s > /dev/null 2>&1", SHELL_PLAYER, PLAYER_ARGS, sound_plug);
-			if(!(flags & flag_mute)) system(shell_command);
-
+		if(acpi.status == PLUGGED){
+			verbose_printf("AC was plugged\n", argv[0]);
+			if(!is_flag_set(flag_mute)){
+    			char shell_command[16 + sizeof(SHELL_PLAYER) + sizeof(PLAYER_ARGS) + sizeof(sound_plug)];
+    			snprintf(shell_command, sizeof(shell_command),"%s %s %s > /dev/null 2>&1", SHELL_PLAYER, PLAYER_ARGS, sound_plug);
+			    system(shell_command);
+			}
 			continue;
 		}
 		// If state changed to unplugged - no if needed
-		verbose_printf("[LOG] %s: AC was unplugged\n", argv[0]);
-		char shell_command[16 + sizeof(SHELL_PLAYER) + sizeof(PLAYER_ARGS) + sizeof(sound_unplug)];
-		snprintf(shell_command, sizeof(shell_command),"%s %s %s > /dev/null 2>&1", SHELL_PLAYER, PLAYER_ARGS, sound_unplug);
-		if(!(flags & flag_mute)) system(shell_command);
-	} while (!(flags & flag_litemode));
+		verbose_printf("AC was unplugged\n", argv[0]);
+		if(!is_flag_set(flag_mute)){
+    		char shell_command[16 + sizeof(SHELL_PLAYER) + sizeof(PLAYER_ARGS) + sizeof(sound_unplug)];
+    		snprintf(shell_command, sizeof(shell_command),"%s %s %s > /dev/null 2>&1", SHELL_PLAYER, PLAYER_ARGS, sound_unplug);
+		    system(shell_command);
+		}
+	} while (!is_flag_set(flag_lite));
 
 	return 0;
 }

@@ -4,10 +4,12 @@ state (whether the AC was plugged or unplugged) happened and play a sound accord
 
 This solution uses an infinite loop to read a file every second (or another custom set delay time)
 to detect state changes and play a set sound, the 'sleep' function is used carefully since it's not
-resource free, and to keep things simple, a shell program is used for playing sound
+resource free, and to keep things simple, a shell program is used for playing sound.
+
 
 ## Usage
 Check the help message by using parameter '-h'
+
 ```txt
 usage: acpower-sound [-h] [-l] [-v] [-m]
 
@@ -20,8 +22,25 @@ option:
 	-v	Enable verbose output - prints current state every loop.
 ```
 
+### Autostart
+
+I recommend creating a systemd user service so it starts everytime you login, there is an example systemd service file.
+
+```bash
+# Copy/move this file to user data folder
+$ cp acpi-power.service $XDG_DATA_HOME/systemd/user/
+
+# Reload daemon (updates systemd stuff)
+$ systemctl --user daemon-reload
+
+# Enable it 
+$ systemctl --user enable --now acpi-sound
+```
+
+
 ## Configuration
 Change the necessary defines in the source file.
+
 
 ## Performance
 You can use the lite mode with the mute option to measure the time it takes the program to run, I think it's about as fast, and as light on resources as I can make.
