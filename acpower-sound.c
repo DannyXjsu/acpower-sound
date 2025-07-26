@@ -1,10 +1,14 @@
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#include <string.h>
+#include <uchar.h>
 #include <unistd.h>
 #include <errno.h>
 #include <stdbool.h>
 #include <linux/limits.h>
+#include <sys/wait.h>
 
 // ##### EXPLANATION #####
 // This program will read ACPI status file of AC power supply to see if a change in
@@ -24,20 +28,21 @@
 // ##### ACPI STUFF #####
 
 // Change this path according to you system - ACPI is a mess and location of these files vary a lot
-#define AC_PATH "/sys/class/power_supply/AC0"
+const char *AC_PATH = "/sys/class/power_supply/AC0";
 // This is the file that stores the status of the AC, the "online" provives a 0 or a 1
-#define AC_STATUS_FILE "online"
+const char *AC_STATUS_FILE = "online";
 
 // ##### SOUNDS #####
 
 // Calling shell program saves me from a headache, change this if needed
-// NOTE: Any output to stdout from the player will be supressed
+// NOTE: Any output to stdout from the player will be suppressed
 #define SHELL_PLAYER "ffplay" // or aplay, mpv, ffplay, etc...
 // Additional arguments for the player
-#define PLAYER_ARGS "-v 0 -nodisp -autoexit"
-#define SOUNDS_PATH "/usr/share/sounds/freedesktop/stereo"
-#define SOUND_PLUG "power-plug.oga"
-#define SOUND_UNPLUG "power-unplug.oga"
+#define PLAYER_ARGS "-v", "0", "-nodisp", "-autoexit"
+
+const char *SOUNDS_PATH = "/usr/share/sounds/freedesktop/stereo";
+const char *SOUND_PLUG = "power-plug.oga";
+const char *SOUND_UNPLUG = "power-unplug.oga";
 
 // ##### FLAGS #####
 
@@ -49,18 +54,67 @@ const unsigned int flag_mute	=	(1<<2);	// 4
 // ##### ENUM #####
 
 typedef enum Status{
-    UNPLUGGED,
-    PLUGGED,
+	UNPLUGGED,
+	PLUGGED,
 }ACStatus;
 
 typedef struct{
-    // Location to where the AC power supply status file is located at
-    char status_file[PATH_MAX];
-    // Holds the current status of the AC power supply status
-    ACStatus status;
+	// Location to where the AC power supply status file is located at
+	char status_file[PATH_MAX];
+	// Holds the current status of the AC power supply status
+	ACStatus status;
 }ACPI;
 
 // ##### HELPER FUNCTIONS #####
+
+#define nameof(var) #var
+
+static inline void print_help(bool unknown, char *arg)
+{
+	printf("usage: acpower-sound [-h] [-l] [-v] [-m]\n\n");
+	if (unknown){
+		printf("acpower-sound: error: Unknown arguments: %s\n", arg);
+	} else {
+		printf("Reads AC status and plays sound depending of state changes.\n\n");
+		printf("option:\n");
+		printf("\t-h\tShow this help message and exit.\n");
+		printf("\t-l\tEnables lite mode - run once and play sound depending of current AC state.\n");
+		printf("\t-m\tMute - skip playing audio when the state changes.\n");
+		printf("\t-v\tEnable verbose output - prints current state every loop.\n");
+	}
+}
+
+// Returns false if program should exit, true if should continue to main loop
+static inline bool set_flags(int argc, char **argv){
+    for (size_t i = 1; i < argc; i++){
+		// If argument found
+		if (argv[i][0] == '-')
+			switch(argv[i][1]){
+				case 'v':
+					flags |= flag_verbose;
+					break;
+				case 'l':
+					flags |= flag_lite;
+					break;
+				case 'm':
+					flags |= flag_mute;
+					break;
+				case 'h':
+					print_help(0, NULL);
+					return false;
+					break;
+				default:
+					print_help(1, argv[i]);
+					return false;
+					break;
+			}
+	}
+	return true;
+}
+
+static inline bool is_flag_set(unsigned int flag){
+	return (flags & flag);
+}
 
 // Open file and only read the first character (which is the only one relevant, and present)
 static inline int read_status_file(char *status_file, unsigned int *out){
@@ -70,17 +124,17 @@ static inline int read_status_file(char *status_file, unsigned int *out){
 		return errno;
 	}
 
-	int char_ = fgetc(file);
+	int ch = fgetc(file);
 	fclose(file);
-	if (char_ == EOF) perror("Missing status!");
-	else *out = char_ - '0'; // Convert char to int by subtracting ascii value of 0
+	if (ch == EOF) perror("Missing status!");
+	else *out = ch - '0'; // Convert char to int by subtracting ascii value of 0
 
 	return 0;
 }
 
 // Prints to stdout only if the verbose flag is set
 static inline int verbose_printf(const char *format, ...){
-	if(!(flags & flag_verbose))
+	if(!is_flag_set(flag_verbose))
 		return 0;
 	size_t len = 0;
 	va_list argv;
@@ -125,58 +179,43 @@ static inline int verbose_printf(const char *format, ...){
 	return len;
 }
 
-static inline void print_help(bool unknown, char *arg)
-{
-	printf("usage: acpower-sound [-h] [-l] [-v] [-m]\n\n");
-	if (unknown){
-		printf("acpower-sound: error: Unknown arguments: %s\n", arg);
+static inline void play_sound(const char *filename){
+	pid_t pid = fork();
+	if (pid < 0) {
+		// Fork failed
+		perror("Unable to fork process");
+		return;
+	}
+	
+	if (pid == 0) {
+		// In child process
+
+		// Suppress stdout/stderr:
+		freopen("/dev/null", "w", stdout);
+		//freopen("/dev/null", "w", stderr);
+
+		char *const args[] = {
+			SHELL_PLAYER,
+			PLAYER_ARGS,
+			(char *)filename,
+			NULL
+		};
+		execvp(SHELL_PLAYER, args);
+
+		// If exec fails:
+		perror("Unable to execute shell player");
+		exit(EXIT_FAILURE);
 	} else {
-		printf("Reads AC status and plays sound depending of state changes.\n\n");
-		printf("option:\n");
-		printf("\t-h\tShow this help message and exit.\n");
-		printf("\t-l\tEnables lite mode - run once and play sound depending of current AC state.\n");
-		printf("\t-m\tMute - skip playing audio when the state changes.\n");
-		printf("\t-v\tEnable verbose output - prints current state every loop.\n");
+		// parent: wait for child to finish
+		waitpid(pid, NULL, 0);
 	}
-}
-
-// Returns false if program should exit, true if should continue to main loop
-static inline bool set_flags(int argc, char **argv){
-    for (size_t i = 1; i < argc; i++){
-		// If argument found
-		if (argv[i][0] == '-')
-			switch(argv[i][1]){
-				case 'v':
-					flags |= flag_verbose;
-					break;
-				case 'l':
-					flags |= flag_lite;
-					break;
-				case 'm':
-					flags |= flag_mute;
-					break;
-				case 'h':
-					print_help(0, NULL);
-					return false;
-					break;
-				default:
-					print_help(1, argv[i]);
-					return false;
-					break;
-			}
-	}
-    return true;
-}
-
-static inline bool is_flag_set(unsigned int flag){
-   return (flags & flag);
 }
 
 // ##### MAIN #####
 int main(int argc, char **argv){
 	// ARGUMENTS
 	if(!set_flags(argc, argv))
-	    return 0;
+		return 0;
 
 	// PROGRAM
 	ACPI acpi;
@@ -189,10 +228,6 @@ int main(int argc, char **argv){
 	snprintf(acpi.status_file, sizeof(acpi.status_file), "%s/%s", AC_PATH, AC_STATUS_FILE);
 
 	// Convert the sounds define into a single string
-	char sound_plug[sizeof(SOUNDS_PATH) + sizeof(SOUND_PLUG) + 2];
-	char sound_unplug[sizeof(SOUNDS_PATH) + sizeof(SOUND_UNPLUG) + 2];
-	snprintf(sound_plug, sizeof(sound_plug), "%s/%s", SOUNDS_PATH, SOUND_PLUG);
-	snprintf(sound_unplug, sizeof(sound_unplug), "%s/%s", SOUNDS_PATH, SOUND_UNPLUG);
 
 	// Get current AC status before starting loop
 	errno = read_status_file(acpi.status_file, &acpi_status_previous);
@@ -200,13 +235,13 @@ int main(int argc, char **argv){
 
 	// If verbose; print info, otherwise get to looping
 	verbose_printf("PROGRAM STARTING WITH VERBOSE FLAG SET\n");
-	verbose_printf("acpi.status_file:\t%s\n", acpi.status_file);
-	verbose_printf("sound_plug:\t%s\n", sound_plug);
-	verbose_printf("sound_unplug:\t%s\n", sound_unplug);
+	verbose_printf("%s:\t%s\n", nameof(acpi.status_file), acpi.status_file);
+	verbose_printf("sound_plug:\t%s/%s\n", SOUNDS_PATH, SOUND_PLUG);
+	verbose_printf("sound_unplug:\t%s/%s\n", SOUNDS_PATH, SOUND_PLUG);
 	// Verbosing flags
-	if (flags & flag_lite)
+	if (is_flag_set(flag_lite))
 		verbose_printf("Lite mode is enabled\n");
-	if (flags & flag_mute)
+	if (is_flag_set(flag_mute))
 		verbose_printf("Mute flag set, playing audio will be skipped\n");
 	verbose_printf("\nLOG START:\n");
 
@@ -227,20 +262,20 @@ int main(int argc, char **argv){
 		acpi_status_previous = acpi.status;
 		// If state changed to plugged
 		if(acpi.status == PLUGGED){
-			verbose_printf("AC was plugged\n", argv[0]);
+		    verbose_printf("AC was plugged\n", argv[0]);
 			if(!is_flag_set(flag_mute)){
-    			char shell_command[16 + sizeof(SHELL_PLAYER) + sizeof(PLAYER_ARGS) + sizeof(sound_plug)];
-    			snprintf(shell_command, sizeof(shell_command),"%s %s %s > /dev/null 2>&1", SHELL_PLAYER, PLAYER_ARGS, sound_plug);
-			    system(shell_command);
+				char sound_plug[strlen(SOUNDS_PATH) + strlen(SOUND_PLUG) + 2];
+				snprintf(sound_plug, sizeof(sound_plug), "%s/%s", SOUNDS_PATH, SOUND_PLUG);
+				play_sound(sound_plug);
 			}
 			continue;
 		}
 		// If state changed to unplugged - no if needed
 		verbose_printf("AC was unplugged\n", argv[0]);
 		if(!is_flag_set(flag_mute)){
-    		char shell_command[16 + sizeof(SHELL_PLAYER) + sizeof(PLAYER_ARGS) + sizeof(sound_unplug)];
-    		snprintf(shell_command, sizeof(shell_command),"%s %s %s > /dev/null 2>&1", SHELL_PLAYER, PLAYER_ARGS, sound_unplug);
-		    system(shell_command);
+			char sound_unplug[strlen(SOUNDS_PATH) + strlen(SOUND_UNPLUG) + 2];
+			snprintf(sound_unplug, sizeof(sound_unplug), "%s/%s", SOUNDS_PATH, SOUND_UNPLUG);
+			play_sound(sound_unplug);
 		}
 	} while (!is_flag_set(flag_lite));
 

@@ -11,7 +11,7 @@ default:
 
 .PHONY: install
 install:
-	@mkdir -p /opt/$(NAME)/$(NAME)
+	@mkdir -p /opt/$(NAME)
 	install -m 755 $(BUILD_DIR)/$(NAME) /opt/$(NAME)/$(NAME)
 
 .PHONY: uninstall
