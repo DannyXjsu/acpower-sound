@@ -1,3 +1,9 @@
+# Depracated
+This program has evolved into [Battery Watcher](https://github.com/DannyXjsu/battery-watcher).
+
+It works similarly like this program, but it does not play sounds, it allows to run scripts instead.
+Giving more freedom to do whatever you want depending on state changes.
+
 # ACPower Sound
 This program will read ACPI status file of AC power supply to see if a change in
 state (whether the AC was plugged or unplugged) happened and play a sound accordingly, all in a single source file.
@@ -10,7 +16,7 @@ resource free, and to keep things simple, a shell program is used for playing so
 ## Usage
 Check the help message by using parameter '-h'
 
-```txt
+```
 usage: acpower-sound [-h] [-l] [-v] [-m]
 
 Reads AC status and plays sound depending of state changes.
