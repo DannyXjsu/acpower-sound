@@ -86,7 +86,7 @@ static inline void print_help(bool unknown, char *arg)
 
 // Returns false if program should exit, true if should continue to main loop
 static inline bool set_flags(int argc, char **argv){
-    for (size_t i = 1; i < argc; i++){
+	for (size_t i = 1; i < argc; i++){
 		// If argument found
 		if (argv[i][0] == '-')
 			switch(argv[i][1]){
